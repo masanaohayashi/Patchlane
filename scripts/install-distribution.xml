@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<installer-gui-script minSpecVersion="1">
+  <title>Patchlane</title>
+  <welcome file="install-welcome.html" mime-type="text/html"/>
+  <conclusion file="install-conclusion.html" mime-type="text/html"/>
+  <options customize="never" require-scripts="false" hostArchitectures="arm64"/>
+  <domains enable_localSystem="true" enable_currentUserHome="false" enable_anywhere="false"/>
+  <choices-outline><line choice="default"/></choices-outline>
+  <choice id="default" visible="false"><pkg-ref id="audio.patchlane.driver"/></choice>
+  <pkg-ref id="audio.patchlane.driver" version="0.3.1" onConclusion="None">Driver.pkg</pkg-ref>
+</installer-gui-script>

@@ -1,0 +1,13 @@
+#!/bin/bash
+set -euo pipefail
+service=audio.patchlane.ring-broker
+# Replace only our own launchd service before reloading the HAL plug-in.
+if /bin/launchctl print "system/$service" >/dev/null 2>&1; then
+    /bin/launchctl bootout "system/$service"
+fi
+/bin/launchctl bootstrap system "/Library/LaunchDaemons/$service.plist"
+if /usr/bin/pgrep -x coreaudiod >/dev/null; then
+    if ! /usr/bin/killall -TERM coreaudiod; then
+        /bin/echo 'Patchlane driver installed. Restart the Mac to load the update.'
+    fi
+fi
