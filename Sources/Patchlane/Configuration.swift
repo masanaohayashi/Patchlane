@@ -10,6 +10,8 @@ struct InputSettings: Codable {
     var routes = [true, false, false, false]
 }
 struct BusSettings: Codable {
+    private var dipoleSettings: OutputDipoleSettings? = nil
+    var dipole: OutputDipoleSettings { get { dipoleSettings ?? OutputDipoleSettings() } set { dipoleSettings=newValue } }
     var uid = ""
     private var leftChannel:Int? = nil
     private var rightChannel:Int? = nil
@@ -38,6 +40,10 @@ struct AudioSettings: Codable, Equatable {
 }
 struct Settings: Codable {
     var version = 1
+    private var savedDeviceDipoles: [String:OutputDipoleSettings]? = nil
+    var outputDeviceDipoles: [String:OutputDipoleSettings] { get { savedDeviceDipoles ?? [:] } set { savedDeviceDipoles=newValue.isEmpty ? nil:newValue } }
+    private var savedDipolePresets: [DipolePreset]? = nil
+    var dipolePresets: [DipolePreset] { get { savedDipolePresets ?? [] } set { savedDipolePresets=newValue } }
     private var audioSettings: AudioSettings? = nil
     var audio: AudioSettings { get { audioSettings ?? AudioSettings() } set { audioSettings=newValue } }
     var inputs = Array(repeating: InputSettings(), count: 4)
@@ -46,18 +52,29 @@ struct Settings: Codable {
         guard AudioSettings.frameOptions.contains(audio.frames), AudioSettings.rateOptions.contains(audio.sampleRate),
               (0...8).contains(audio.delayBuffers), version == 1, inputs.count == 4, buses.count == 4 else { throw AppError(L("対応していない設定ファイルです。")) }
         for i in inputs { guard i.routes.count == 4, i.left >= 0, i.right >= 0, i.left < 256, i.right < 256, i.db.isFinite, (-60...36).contains(i.db) else { throw AppError(L("入力設定が無効です。")) } }
+        guard dipolePresets.count<=128,Set(dipolePresets.map(\.id)).count==dipolePresets.count else { throw AppError(L("ダイポール設定が無効です。")) }
+        for p in dipolePresets { guard !p.name.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty,p.name.count<=80 else { throw AppError(L("ダイポール設定が無効です。")) };try p.parameters.validate() }
+        for state in buses.map(\.dipole)+Array(outputDeviceDipoles.values) {
+            try state.parameters.validate()
+            if let id=state.presetID { guard dipolePresets.contains(where:{$0.id==id}) else { throw AppError(L("ダイポール設定が無効です。")) } }
+        }
+        guard outputDeviceDipoles.keys.allSatisfy({!$0.isEmpty}) else { throw AppError(L("ダイポール設定が無効です。")) }
         for b in buses { guard (0..<256).contains(b.left),(0..<256).contains(b.right),b.db.isFinite, (-60...0).contains(b.db) else { throw AppError(L("出力設定が無効です。")) } }
     }
     static var file: URL { FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Patchlane/settings.json") }
     func save(to url: URL = Settings.file) throws {
-        try validate()
+        var snapshot=self
+        snapshot.captureOutputDeviceDipoles()
+        try snapshot.validate()
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        try encoder.encode(self).write(to: url, options: .atomic)
+        try encoder.encode(snapshot).write(to: url, options: .atomic)
     }
     static func load(from url: URL = Settings.file) throws -> Settings {
-        let s = try JSONDecoder().decode(Settings.self, from: Data(contentsOf: url))
-        try s.validate(); return s
+        var s = try JSONDecoder().decode(Settings.self, from: Data(contentsOf: url))
+        try s.validate()
+        s.restoreOutputDeviceDipoles()
+        return s
     }
 }
 struct AppError: LocalizedError { var message: String; init(_ message: String) { self.message = message }; var errorDescription: String? { message } }

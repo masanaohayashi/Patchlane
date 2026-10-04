@@ -103,6 +103,12 @@ int main() {
     CHECK(lc_shared_output_input_peak(&routed)>0.24f);
     CHECK(lc_shared_output_peak(&routed)==0);
     for(float value:samples) CHECK(value==0);
+    LCDipoleConfig dipole{};dipole.spacingCM=20;dipole.distanceCM=100;dipole.headCM=17.5;dipole.maxBoostDB=12;dipole.tonalReference=1;
+    dipole.geqDB[0]=12;dipole.geqDB[17] = -6;
+    CHECK(lc_shared_output_dipole(&routed,&dipole,44100)==0);lc_shared_output_dipole_enabled(&routed,1);
+    for(int block=0;block<300;++block) { AUDIT_CALLBACK(LCSharedOutput::callback(0,nullptr,nullptr,nullptr,&buffers,&time,&routed)); }
+    lc_shared_output_dipole_enabled(&routed,0);
+    for(int block=0;block<20;++block) { AUDIT_CALLBACK(LCSharedOutput::callback(0,nullptr,nullptr,nullptr,&buffers,&time,&routed)); }
     std::puts("PASS shared controls: selected L/R, gain, route off, independent input/output meters");
     std::puts("PASS shared output callback: channel routing, zero delay, missing frames, explicit delay, invalid clock");
 }

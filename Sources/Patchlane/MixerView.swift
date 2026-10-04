@@ -6,6 +6,7 @@ private let separator=Color(nsColor:.separatorColor)
 
 struct MixerView: View {
     @ObservedObject var model: MixerModel
+    @State private var dipoleBus:Int?
     @ObservedObject private var driver=DriverModel.shared
     private var usesDriver:Bool { model.dedicatedMode || driver.connectionIntent.wanted }
     var body: some View {
@@ -22,6 +23,7 @@ struct MixerView: View {
         }.background(windowBackground)
         .frame(minWidth:1080)
         .fixedSize(horizontal:false,vertical:true)
+        .sheet(isPresented:Binding(get:{dipoleBus != nil},set:{if !$0{dipoleBus=nil}})) { if let bus=dipoleBus { DipoleEditor(model:model,bus:bus) } }
         .alert(L("確認してください"),isPresented:Binding(get:{model.error != nil || driver.error != nil},set:{if !$0 { model.error=nil;driver.error=nil }})) { Button("OK") { model.error=nil } } message: { Text(model.error ?? driver.error ?? "") }
     }
     private var mixer: some View {
@@ -75,6 +77,16 @@ struct MixerView: View {
             }.onChange(of:model.settings.buses[i].left) { _ in model.changed(reconfigure:true) }.onChange(of:model.settings.buses[i].right) { _ in model.changed(reconfigure:true) }
             Meter(peak:model.outputPeaks[i])
             deviceVolume(model.settings.buses[i].uid)
+            HStack {
+                Toggle("Dipole",isOn:Binding(get:{model.settings.buses[i].dipole.enabled},set:{model.settings.buses[i].dipole.enabled=$0;model.changed()})).toggleStyle(.switch).controlSize(.mini)
+                Spacer()
+                Button { dipoleBus=i } label: { Image(systemName:"slider.horizontal.3") }.help(L("ダイポールとGEQの設定"))
+            }
+            Picker(L("プリセット"),selection:Binding<UUID?>(get:{model.settings.buses[i].dipole.presetID},set:{model.settings.selectDipolePreset($0,bus:i);model.changed()})) {
+                Text(L("カスタム")).tag(UUID?.none)
+                ForEach(model.settings.dipolePresets){preset in Text(preset.name).tag(Optional(preset.id))}
+            }.labelsHidden().controlSize(.small)
+
         }.padding(12).frame(maxWidth:.infinity).background(panel).clipShape(RoundedRectangle(cornerRadius:8)).overlay(RoundedRectangle(cornerRadius:8).strokeBorder(separator,lineWidth:0.5))
     }
     private func deviceVolume(_ uid:String)->some View {

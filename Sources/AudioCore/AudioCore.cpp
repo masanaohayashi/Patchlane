@@ -1,4 +1,5 @@
 #include "AudioCore.h"
+#include "DipoleDSP.hpp"
 #include <AudioToolbox/AudioToolbox.h>
 #include <CoreAudio/CoreAudio.h>
 #include <atomic>
@@ -43,6 +44,7 @@ struct Input {
 };
 struct Output {
     uint32_t device=0; int left=0,right=1; double rate=48000; AudioUnit unit=nullptr;
+    patchdipole::Effect dipole;
     std::atomic<float> gain{1},peak{0};
     Cursor cursor[N]; float master=0;
     std::atomic<uint32_t> callbackFrames{0};
@@ -159,6 +161,7 @@ struct LCEngine {
                 c.position+=step;
             }
         }
+        o.dipole.process(dest,2,dest+1,2,frames);
         float peak=0,goal=output[bus].gain.load(std::memory_order_relaxed);
         const float slew=1.f-std::exp(-1.f/(float(rate)*0.005f));
         for(int f=0;f<frames;++f) {
@@ -236,6 +239,13 @@ int lc_config_output(LCEngine *e,int b,uint32_t d){if(!e||e->running||b<0||b>=N)
 int lc_config_output_channels(LCEngine *e,int bus,int left,int right) {
     if(!e||e->running||bus<0||bus>=N||left<0||right<0||left==right)return -1;
     e->output[bus].left=left;e->output[bus].right=right;return 0;
+}
+int lc_output_dipole(LCEngine *e,int bus,const LCDipoleConfig *c,double rate) {
+    if(!e||!c||bus<0||bus>=N)return -1;
+    try { e->output[bus].dipole.configure(*c,rate);e->offline[bus].dipole.configure(*c,rate);return 0; }catch(...){return -1;}
+}
+void lc_output_dipole_enabled(LCEngine *e,int bus,int enabled) {
+    if(e&&bus>=0&&bus<N){e->output[bus].dipole.enabled.store(enabled!=0);e->offline[bus].dipole.enabled.store(enabled!=0);}
 }
 void lc_input_gain(LCEngine *e,int i,float g){if(e&&i>=0&&i<N)e->input[i].gain.store(std::isfinite(g)?std::clamp(g,0.f,64.f):0);}
 void lc_output_gain(LCEngine *e,int b,float g){if(e&&b>=0&&b<N)e->output[b].gain.store(std::isfinite(g)?std::clamp(g,0.f,1.f):0);}

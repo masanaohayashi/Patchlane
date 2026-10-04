@@ -53,6 +53,9 @@ final class MixerModel: ObservableObject {
     private var watcher: Timer?
     private var volumeWatcher: Timer?
     private var saveWork: DispatchWorkItem?
+    private let dipoleCache=DipoleControlCache()
+    private var dipoleWork:DispatchWorkItem?
+    private var dipoleBusSnapshot=[BusSettings]()
     private var sleepToken: NSObjectProtocol?
     private var wakeToken: NSObjectProtocol?
     init(settingsURL:URL=Settings.file,deviceAccess:MixerDeviceAccess=MixerDeviceAccess()) {
@@ -61,6 +64,7 @@ final class MixerModel: ObservableObject {
         if FileManager.default.fileExists(atPath:settingsURL.path) {
             do { settings=try Settings.load(from:settingsURL) } catch { self.error=L("保存済み設定を読み込めませんでした: %@",error.localizedDescription) }
         }
+        dipoleBusSnapshot=settings.buses
         refreshDevices()
         refreshDeviceVolumes()
         volumeWatcher=Timer.scheduledTimer(withTimeInterval:0.25,repeats:true) { [weak self] _ in self?.refreshDeviceVolumes() }
@@ -142,21 +146,41 @@ final class MixerModel: ObservableObject {
             }
         }
     }
+    private func rememberOutputDipoles() {
+        settings.synchronizeOutputDeviceDipoles(previous:dipoleBusSnapshot)
+        dipoleBusSnapshot=settings.buses
+    }
     func changed(reconfigure:Bool=false) {
+        rememberOutputDipoles()
         if lifecycle.dedicated { DriverModel.shared.configure(settings) }
         if reconfigure { refreshDeviceVolumes() }
         applyLevels()
+        applyDipoles()
         if reconfigure && lifecycle.shouldRunMixer && connectionSettings != MixerConnectionSettings(settings) { stop(); start() }
         saveWork?.cancel()
         let work=DispatchWorkItem { [weak self] in self?.save() }; saveWork=work
         DispatchQueue.main.asyncAfter(deadline:.now()+0.5,execute:work)
     }
     func save() {
+        rememberOutputDipoles()
         let snapshot=settings,url=settingsURL
         persistenceQueue.async {
             do { try snapshot.save(to:url) }
             catch { let message=error.localizedDescription;DispatchQueue.main.async { self.error=message } }
         }
+    }
+    func applyDipoles() {
+        dipoleWork?.cancel()
+        let snapshot=settings
+        let work=DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            let ok=self.dipoleCache.apply(settings:snapshot,
+                configure:{ bus,c,rate in lc_output_dipole(self.engine,Int32(bus),&c,rate) },
+                enable:{ bus,on in lc_output_dipole_enabled(self.engine,Int32(bus),on ? 1:0) })
+            if !ok { DispatchQueue.main.async { self.error=L("ダイポールFIRを生成できませんでした。") } }
+        }
+        dipoleWork=work
+        controlQueue.asyncAfter(deadline:.now()+0.08,execute:work)
     }
     func applyLevels() {
         for i in 0..<4 {
@@ -184,6 +208,7 @@ final class MixerModel: ObservableObject {
             guard let d=device(s.uid),d.outputs>0 else { error=L("出力機器が接続されていません。選択を確認してください。"); return }
         }
         applyLevels()
+        applyDipoles()
         let ins=settings.inputs,outs=settings.buses,ds=devices
         let timing=settings.audio
         let generation=UUID();controlGeneration=generation;startPending=true
@@ -233,7 +258,7 @@ final class MixerModel: ObservableObject {
         }
     }
     func shutdown() {
-        lifecycle.shuttingDown=true;saveWork?.cancel();save();stop()
+        lifecycle.shuttingDown=true;saveWork?.cancel();dipoleWork?.cancel();save();stop()
         // Termination waits for teardown; audio callbacks never wait on these queues.
         controlQueue.sync {};persistenceQueue.sync {}
     }

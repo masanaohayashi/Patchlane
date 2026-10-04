@@ -14,14 +14,14 @@ xcrun clang++ -std=c++17 -O2 -Wall -Wextra -Werror -IShared Tools/reader-quality
 xcrun clang++ -std=c++17 -O2 -Wall -Wextra -Werror -IShared Tests/DriverTests/TimedReaderTests.cpp -o .build/timed-reader-tests
 .build/timed-reader-tests
 xcrun clang++ -std=c++17 -O2 -Wall -Wextra -Werror -ISources/AudioCore/include Tests/DriverTests/SharedOutputTests.cpp \
-  -framework CoreAudio -framework CoreFoundation -framework Security -lbsm -o .build/shared-output-tests
+  -framework Accelerate -framework CoreAudio -framework CoreFoundation -framework Security -lbsm -o .build/shared-output-tests
 .build/shared-output-tests
-xcrun clang++ -std=c++17 -O2 -Wall -Wextra -Werror -ISources/AudioCore/include Tests/DriverTests/StereoSharedOutputTests.cpp -framework CoreAudio -framework CoreFoundation -framework Security -lbsm -o .build/stereo-shared-output-tests
+xcrun clang++ -std=c++17 -O2 -Wall -Wextra -Werror -ISources/AudioCore/include Tests/DriverTests/StereoSharedOutputTests.cpp -framework Accelerate -framework CoreAudio -framework CoreFoundation -framework Security -lbsm -o .build/stereo-shared-output-tests
 .build/stereo-shared-output-tests
 xcrun clang++ -std=c++17 -O2 -Wall -Wextra -Werror -IDriver Tests/DriverTests/SharedClockTests.cpp -o .build/shared-clock-tests
 .build/shared-clock-tests
 xcrun clang++ -std=c++17 -O2 -Wall -Wextra -Werror -IDriver Tests/DriverTests/DriverTests.cpp \
-  -framework CoreAudio -framework CoreFoundation -o .build/driver-tests
+  -framework Accelerate -framework CoreAudio -framework CoreFoundation -o .build/driver-tests
 .build/driver-tests "$PWD/build/Patchlane.driver"
 .build/driver-tests "$PWD/build/Patchlane-2ch.driver" --stereo
 

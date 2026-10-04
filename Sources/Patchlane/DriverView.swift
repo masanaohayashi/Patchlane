@@ -66,6 +66,8 @@ final class DriverModel:ObservableObject {
     @Published var error:String?
     private let handles=(0..<4).map { _ in lc_shared_output_create()! }
     private let queue=DispatchQueue(label:"Patchlane.driverControl",qos:.userInitiated)
+    private let dipoleCache=DipoleControlCache()
+    private var dipoleWork:DispatchWorkItem?
     private let preferencesQueue=DispatchQueue(label:"Patchlane.driverPreferences",qos:.utility)
     private var reconnectDetail:String?
     private var reconnectStatus:String {
@@ -121,6 +123,7 @@ final class DriverModel:ObservableObject {
     func configure(_ settings:Settings) {
         desired=settings
         applyLevels(settings)
+        applyDipoles(settings)
         guard connectionIntent.wanted else { return }
         if identity != MixerConnectionSettings(settings) {
             connectionIntent.interrupt(now:ProcessInfo.processInfo.systemUptime)
@@ -212,6 +215,18 @@ final class DriverModel:ObservableObject {
         pendingStart=work
         queue.asyncAfter(deadline:.now()+0.12,execute:work)
         applyLevels(settings)
+        applyDipoles(settings)
+    }
+    private func applyDipoles(_ settings:Settings) {
+        dipoleWork?.cancel()
+        let work=DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            let ok=self.dipoleCache.apply(settings:settings,
+                configure:{ bus,c,rate in lc_shared_output_dipole(self.handles[bus],&c,rate) },
+                enable:{ bus,on in lc_shared_output_dipole_enabled(self.handles[bus],on ? 1:0) })
+            if !ok { DispatchQueue.main.async { self.error=L("ダイポールFIRを生成できませんでした。") } }
+        }
+        dipoleWork=work;queue.asyncAfter(deadline:.now()+0.08,execute:work)
     }
     private func applyLevels(_ settings:Settings) {
         let input=settings.inputs[0]
@@ -269,7 +284,7 @@ final class DriverModel:ObservableObject {
         }
     }
     func shutdownBridge() {
-        persist();pendingStart?.cancel();connectionIntent.stop();generation=UUID();suspensionToken=UUID()
+        persist();pendingStart?.cancel();dipoleWork?.cancel();connectionIntent.stop();generation=UUID();suspensionToken=UUID()
         queue.sync { stopOutputs() };preferencesQueue.sync {}
     }
 }

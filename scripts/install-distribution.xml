@@ -7,5 +7,5 @@
   <domains enable_localSystem="true" enable_currentUserHome="false" enable_anywhere="false"/>
   <choices-outline><line choice="default"/></choices-outline>
   <choice id="default" visible="false"><pkg-ref id="audio.patchlane.driver"/></choice>
-  <pkg-ref id="audio.patchlane.driver" version="0.3.1" onConclusion="None">Driver.pkg</pkg-ref>
+  <pkg-ref id="audio.patchlane.driver" version="0.4.0" onConclusion="None">Driver.pkg</pkg-ref>
 </installer-gui-script>

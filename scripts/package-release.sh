@@ -41,5 +41,5 @@ spctl --assess --type execute --verbose=2 "$release/Patchlane Uninstaller.app"
 # ZIPs cannot hold a stapled ticket themselves; rebuild with the stapled products.
 rm -f "$archive"
 ditto -c -k --keepParent "$release" "$archive"
-shasum -a 256 "$archive" > "$archive.sha256"
+(cd "$(dirname "$archive")" && shasum -a 256 "$(basename "$archive")") > "$archive.sha256"
 printf '\nRelease: %s\n' "$archive"

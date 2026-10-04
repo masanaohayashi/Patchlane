@@ -7,6 +7,7 @@ Audio routing for macOS on Apple Silicon. Route audio from apps and devices to u
 ## Features
 
 - Four stereo inputs routed independently to Main, Aux 1, Aux 2, and Aux 3.
+- Per-output stereo dipole with a one-click bypass, 31-band GEQ, and named presets.
 - Built-in Patchlane 2ch and Patchlane 8ch virtual audio devices.
 - Dedicated driver mode for a direct shared-memory audio path to output devices.
 - Adjustable sample rate, buffer size, and additional buffering.
@@ -46,6 +47,24 @@ Use **Patchlane 2ch** for stereo workflows, including QuickTime screen recording
 Enable **Dedicated driver** to route Input 1 from a Patchlane virtual device directly to the selected outputs. Inputs 2–4 are disabled in this mode. Input gain, routing, channel selection, and meters remain available in the same interface.
 
 Turning this mode on stops the normal mixer before connecting. Turning it off automatically resumes the normal mixer. Changing connection settings reconnects the audio path with the new settings.
+
+### Stereo dipole and GEQ
+
+Each output card has a **Dipole** switch, a preset picker, and a settings button. Effects default to **off**, so existing routes remain unchanged. Both normal mixer and dedicated driver modes support the effect.
+
+In the settings window, enter the actual speaker centre spacing, listening distance, head width and boost limit. The generated filter preserves the electrical Mid/Side magnitude below 100Hz and transitions to regularized cancellation between 100 and 300Hz. It is an approximate head model, not a measured room or individual HRTF calibration.
+
+The linked-stereo 31-band GEQ covers 20Hz–20kHz with ±12dB per band and an input trim. The signal order is **existing correction → GEQ → dipole**. The common scalar correction commutes with the linked-stereo GEQ, allowing correction and the symmetric dipole matrix to share one FIR processor. GEQ remains a separate IIR stage to preserve exact low-band gain. Changes apply during playback after a brief synthesis debounce and fade; toggling off skips FFT and GEQ processing after the release fade.
+
+Selecting a preset fills the preset name field. Enter a name and choose **Save**; an existing name requires overwrite confirmation (including case-insensitive matches). Each physical output device remembers its own enabled state, preset and parameters by its stable Core Audio UID. Switching devices restores that device’s last settings before applying the effect; previously unconfigured devices start with Dipole off and default parameters. The same device selected in another Main/Aux output uses the same remembered state. Saving an existing name updates the preset, all linked outputs and remembered assignments for disconnected devices. Editing a parameter makes that output Custom without changing other outputs. **Delete selected preset** removes the named entry and clears its output and remembered device links, retaining those outputs' last settings as Custom. Presets, links and enabled state persist in settings.json and are included in the existing settings format; files from before dipole support load with dipole disabled. Earlier dipole settings migrate to the currently selected device; device associations that were never stored cannot be reconstructed.
+
+The effect applies no automatic attenuation or limiter. Boosted signals can clip at the existing output clamp; input trim and GEQ change gain only when explicitly adjusted.
+
+The C++ processor uses two Mid/Side paths, 8192 FIR taps, 256-frame partitions, Accelerate FFT, positive-frequency-only convolution, and ARM NEON complex MAC/stereo biquads. Zero-gain GEQ bands are omitted. Preparation and memory reclamation happen on serialized control queues; the callback neither allocates nor takes locks. The included model is computed locally, with no Wareing IR redistribution.
+
+The Mid and Side filters use standard homomorphic minimum-phase reconstruction: log magnitude → inverse FFT (real cepstrum) → causal cepstral folding → FFT → complex exponential → inverse FFT. A 32768-point synthesis grid and one-sided tail taper produce 8192 taps with no added FIR design delay. This preserves the two modal magnitude targets but changes their relative phase; it is an experimental approximation and can change crosstalk cancellation. It does not reproduce a verified Hamada-specific implementation.
+
+The effect adds **256 samples** of fixed buffering while enabled (about **5.8ms at 44.1kHz**, **5.3ms at 48kHz**), separately from routing/device latency. Minimum-phase filters still have frequency-dependent group delay; these numbers are the FFT block buffering, not a constant total delay at all frequencies. Disabled outputs add no effect delay. Outputs with different effect states are therefore not time-aligned.
 
 ### Buffering and latency
 

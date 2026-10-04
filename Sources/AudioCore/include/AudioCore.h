@@ -3,6 +3,18 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+// Dipole presets are synthesized on the control thread at the actual output rate.
+typedef struct {
+    double spacingCM,distanceCM,headCM,maxBoostDB,trimDB;
+    int tonalReference;
+    double geqDB[31];
+} LCDipoleConfig;
+typedef struct LCDipoleTest LCDipoleTest;
+LCDipoleTest *lc_dipole_test_create(const LCDipoleConfig *config,double rate);
+void lc_dipole_test_destroy(LCDipoleTest *effect);
+void lc_dipole_test_process(LCDipoleTest *effect,float *stereo,int frames,int enabled);
+int lc_dipole_latency(void);
+const char *lc_dipole_backend(void);
 // Control-thread-only connection diagnostic; does not start audio IO.
 int lc_shared_probe(char *error,int capacity);
 // Explicit diagnostic only. Generates synthetic audio on idle virtual devices.
@@ -17,6 +29,8 @@ int lc_shared_output_start(LCSharedOutput *output,uint32_t device,int bus,int le
 int lc_shared_output_start_source(LCSharedOutput *output,uint32_t source,uint32_t device,int bus,int left,int right,int frames,double rate,double delayFrames);
 // Configure source channels while stopped; levels/meters are lock-free.
 int lc_shared_output_channels(LCSharedOutput *output,int left,int right);
+int lc_shared_output_dipole(LCSharedOutput *output,const LCDipoleConfig *config,double rate);
+void lc_shared_output_dipole_enabled(LCSharedOutput *output,int enabled);
 void lc_shared_output_levels(LCSharedOutput *output,float inputGain,int routed,int muted);
 float lc_shared_output_input_peak(LCSharedOutput *output);
 float lc_shared_output_peak(LCSharedOutput *output);
@@ -52,6 +66,8 @@ void lc_destroy(LCEngine *e);
 int lc_config_input(LCEngine *e, int index, uint32_t device, int left, int right);
 int lc_config_output(LCEngine *e, int bus, uint32_t device);
 int lc_config_output_channels(LCEngine *e,int bus,int left,int right);
+int lc_output_dipole(LCEngine *e,int bus,const LCDipoleConfig *config,double rate);
+void lc_output_dipole_enabled(LCEngine *e,int bus,int enabled);
 void lc_input_gain(LCEngine *e, int index, float gain);
 void lc_output_gain(LCEngine *e, int bus, float gain);
 void lc_route(LCEngine *e, int input, int bus, int enabled);

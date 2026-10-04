@@ -27,6 +27,10 @@ int main() {
     AUDIT_CALLBACK(LCSharedOutput::callback(0,nullptr,nullptr,nullptr,&buffers,&when,&output));
     assert(output.received==32 && output.missing==0);
     for(unsigned f=0;f<32;++f) { assert(std::abs(dest[2*f]-0.125f)<0.0001f);assert(std::abs(dest[2*f+1]+0.25f)<0.0001f); }
+    LCDipoleConfig dipole{};dipole.spacingCM=20;dipole.distanceCM=100;dipole.headCM=17.5;dipole.maxBoostDB=12;dipole.tonalReference=1;
+    dipole.geqDB[17]=6;
+    assert(lc_shared_output_dipole(&output,&dipole,44100)==0);lc_shared_output_dipole_enabled(&output,1);
+    for(int block=0;block<300;++block) { AUDIT_CALLBACK(LCSharedOutput::callback(0,nullptr,nullptr,nullptr,&buffers,&when,&output)); }
     dsp->attachRing(nullptr);
     puts("PASS stereo: production 2ch DSP -> read-only shared mapping -> output IOProc, independent L/R, no missing frames");
 }

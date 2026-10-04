@@ -44,6 +44,9 @@ int main() {
     std::fill(std::begin(virtualAudio),std::end(virtualAudio),0.25f);
     engine->input[0].route[0]=true;
     AudioBufferList buffers{};buffers.mNumberBuffers=1;buffers.mBuffers[0]={2,sizeof(stereo),stereo};
+    LCDipoleConfig dipole{};dipole.spacingCM=20;dipole.distanceCM=100;dipole.headCM=17.5;dipole.maxBoostDB=12;dipole.tonalReference=1;
+    dipole.geqDB[0]=12;dipole.geqDB[17] = -6;
+    assert(lc_output_dipole(engine.get(),0,&dipole,44100)==0);lc_output_dipole_enabled(engine.get(),0,1);
     // Control publication and UI meter reads must not force audio to wait.
     std::thread control([&] {
         for(int i=0;i<256;++i) {

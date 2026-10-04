@@ -59,3 +59,35 @@
 "再接続中" = "Reconnecting";
 "再接続中（エラーコード: %@）" = "Reconnecting (error code: %@)";
 "再接続中（%@）" = "Reconnecting (%@)";
+
+"ダイポール設定が無効です。" = "Invalid dipole settings.";
+"プリセット名は1〜80文字で入力してください。最大128件保存できます。" = "Use a preset name of 1–80 characters. Up to 128 presets can be saved.";
+"ダイポールFIRを生成できませんでした。" = "Could not generate the dipole FIR.";
+"%@ のステレオダイポール" = "Stereo dipole for %@";
+"有効" = "Enabled";
+"閉じる" = "Close";
+"プリセット" = "Preset";
+"カスタム" = "Custom";
+"保存する名前" = "Preset name";
+"保存" = "Save";
+"選択プリセットを削除" = "Delete selected preset";
+"中心間隔 cm" = "Spacing cm";
+"聴取距離 cm" = "Distance cm";
+"頭幅 cm" = "Head width cm";
+"最大増幅 dB" = "Boost limit dB";
+"補正方式" = "Tone reference";
+"耳元のモデル" = "Ear model";
+"中央音フラット" = "Flat Mid";
+"片側入力フラット" = "Flat single input";
+"既存補正 → 31バンドGEQ → ダイポール · 左右共通 · 20Hz〜20kHz · 各±12dB" = "Correction → 31-band GEQ → dipole · Linked stereo · 20Hz–20kHz · ±12dB per band";
+"GEQを0dBに戻す" = "Reset GEQ to 0dB";
+"入力ゲイン" = "Input gain";
+"低域の左右差を保持。配置に合わせて入力してください。設定変更は再生中に適用されます。" = "Preserves low-frequency Side. Enter your actual geometry. Changes apply during playback.";
+"ダイポールとGEQの設定" = "Dipole and GEQ settings";
+
+"最小位相 · FFTバッファ %.1f ms" = "Minimum phase · FFT buffer %.1f ms";
+
+"プリセットを上書きしますか？" = "Overwrite preset?";
+"上書き" = "Overwrite";
+"キャンセル" = "Cancel";
+"「%@」の設定を上書きします。このプリセットを使う出力デバイスにも反映されます。" = "Overwrite “%@”? This also updates output devices using this preset.";

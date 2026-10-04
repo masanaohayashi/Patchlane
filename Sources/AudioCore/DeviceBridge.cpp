@@ -1,4 +1,5 @@
 #include "AudioCore.h"
+#include "DipoleDSP.hpp"
 #include "../../Shared/BrokerClient.hpp"
 #include "../../Shared/TimedReader.hpp"
 #include <mach/mach_time.h>
@@ -186,6 +187,7 @@ struct LCSharedOutput {
         auto old=value.load(std::memory_order_relaxed);
         if(peak>old)value.compare_exchange_strong(old,peak,std::memory_order_relaxed);
     }
+    patchdipole::Effect dipole;
     lcshared::InterpolationKernel interpolation;
     std::atomic<bool> needsReconnect{false};
     lcshared::MappedAudioRing mapping;
@@ -252,8 +254,13 @@ struct LCSharedOutput {
             a*=self.currentInput;b*=self.currentInput;
             inPeak=std::max(inPeak,std::max(std::abs(a),std::abs(b)));
             a*=self.currentRoute;b*=self.currentRoute;
+            l.samples[f*l.stride]=a;r.samples[f*r.stride]=b;
+        }
+        self.dipole.process(l.samples,int(l.stride),r.samples,int(r.stride),int(frames));
+        for(unsigned f=0;f<frames;++f) {
+            auto &a=l.samples[f*l.stride],&b=r.samples[f*r.stride];
             outPeak=std::max(outPeak,std::max(std::abs(a),std::abs(b)));
-            l.samples[f*l.stride]=std::clamp(a,-1.f,1.f);r.samples[f*r.stride]=std::clamp(b,-1.f,1.f);
+            a=std::clamp(a,-1.f,1.f);b=std::clamp(b,-1.f,1.f);
         }
         meter(self.inputPeak,inPeak);meter(self.outputPeak,outPeak);
         self.initialMissing.fetch_add(initial,std::memory_order_relaxed);
@@ -411,6 +418,10 @@ int lc_shared_output_channels(LCSharedOutput *output,int left,int right) {
     if(!output||output->proc||left<0||right<0||left>=8||right>=8)return -1;
     output->sourceLeft=left;output->sourceRight=right;return 0;
 }
+int lc_shared_output_dipole(LCSharedOutput *o,const LCDipoleConfig *c,double rate) {
+    if(!o||!c)return -1;try{o->dipole.configure(*c,rate);return 0;}catch(...){return -1;}
+}
+void lc_shared_output_dipole_enabled(LCSharedOutput *o,int enabled) { if(o)o->dipole.enabled.store(enabled!=0); }
 void lc_shared_output_levels(LCSharedOutput *output,float gain,int routed,int muted) {
     if(!output)return;
     output->inputGain.store(std::isfinite(gain)?std::clamp(gain,0.f,64.f):0.f,std::memory_order_relaxed);
