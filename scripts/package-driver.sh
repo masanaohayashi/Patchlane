@@ -26,7 +26,7 @@ for bundle in bundles:
 with open(p,'wb') as f: plistlib.dump(bundles,f)
 PYCONFIG
 pkgbuild --root "$staging" --component-plist "$components/bundles.plist" --scripts "$PWD/scripts/driver-package" \
-  --identifier audio.patchlane.driver --version 0.4.0 --ownership recommended \
+  --identifier audio.patchlane.driver --version 0.4.1 --ownership recommended \
   --install-location / "$components/Driver.pkg"
 installer_sign=()
 if [[ -n "${PATCHLANE_INSTALLER_IDENTITY:-}" ]]; then installer_sign=(--sign "$PATCHLANE_INSTALLER_IDENTITY" --timestamp); fi

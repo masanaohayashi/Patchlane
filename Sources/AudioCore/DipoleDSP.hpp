@@ -57,10 +57,6 @@ inline std::array<Z,2> response(const LCDipoleConfig &c,double f,double rate,boo
     }
     return {mid*eq*geq,side*eq*geq};
 }
-struct Spectrum {
-    alignas(64) std::array<float,512> re{},im{};
-    DSPSplitComplex split() { return {re.data(),im.data()}; }
-};
 // Standard homomorphic minimum-phase reconstruction. This deliberately keeps
 // only log magnitude, not the old phase: the two modal phases can change.
 // All synthesis allocations and FFT setup work run on the control thread.
@@ -88,18 +84,25 @@ inline std::vector<Z> minimumPhaseSpectrum(const std::vector<Z> &positive,FFTSet
 }
 // Immutable coefficients can be shared; histories belong to each output callback.
 struct Coefficients {
-    static constexpr int Taps=8192,Block=256,FFT=512,Parts=Taps/Block;
+    static constexpr int MaxTaps=1024;
+    static int tapsForRate(double rate) {
+        int taps=256;
+        while(rate>48000.*(taps/256)&&taps<MaxTaps)taps*=2;
+        return taps;
+    }
+    const int taps;
     static constexpr int SynthesisLog2=15,SynthesisSize=1<<SynthesisLog2;
     double rate;
     LCDipoleConfig settings;
-    std::array<std::array<Spectrum,Parts>,2> spectra{};
+    alignas(64) std::array<std::array<float,MaxTaps>,2> reversed{};
+    std::array<int,2> activeTaps{};
     std::array<std::vector<float>,2> impulse;
     float gain=1;
-    explicit Coefficients(const LCDipoleConfig &c,double r):rate(r),settings(c) {
+    explicit Coefficients(const LCDipoleConfig &c,double r):taps(tapsForRate(r)),rate(r),settings(c) {
         if(!valid(c)||(r!=44100&&r!=48000&&r!=88200&&r!=96000))throw std::invalid_argument("Invalid dipole settings");
-        FFTSetup large=vDSP_create_fftsetup(SynthesisLog2,kFFTRadix2),small=vDSP_create_fftsetup(9,kFFTRadix2);
-        if(!large||!small){if(large)vDSP_destroy_fftsetup(large);if(small)vDSP_destroy_fftsetup(small);throw std::bad_alloc();}
-        struct Cleanup { FFTSetup a,b;~Cleanup(){vDSP_destroy_fftsetup(a);vDSP_destroy_fftsetup(b);} }cleanup{large,small};
+        FFTSetup large=vDSP_create_fftsetup(SynthesisLog2,kFFTRadix2);
+        if(!large)throw std::bad_alloc();
+        struct Cleanup { FFTSetup fft;~Cleanup(){vDSP_destroy_fftsetup(fft);} }cleanup{large};
         std::array<std::vector<Z>,2> target;
         for(auto &v:target)v.resize(SynthesisSize/2+1);
         for(int k=0;k<=SynthesisSize/2;++k) {
@@ -115,33 +118,39 @@ struct Coefficients {
                 if(k>0&&k<SynthesisSize/2){real[SynthesisSize-k]=real[k];imag[SynthesisSize-k]=-imag[k];}
             }
             DSPSplitComplex time{real.data(),imag.data()};vDSP_fft_zip(large,&time,1,SynthesisLog2,FFT_INVERSE);
-            impulse[mode].resize(Taps);
-            // One-sided tail taper: retain the leading impulse at sample zero.
-            // The longer synthesis grid keeps cepstral circular aliasing small.
-            constexpr int Tail=Taps/8;
-            for(int i=0;i<Taps;++i) {
-                const float window=i<Taps-Tail?1.f:float(.5+.5*std::cos(Pi*(i-(Taps-Tail))/(Tail-1)));
-                impulse[mode][i]=real[i]/SynthesisSize*window;
+            impulse[mode].resize(taps);
+            // Keep exactly the requested duration, gently tapering the last 1/8
+            // to zero. No leading fade, design delay, normalization or attenuation.
+            const int tail=taps/8;
+            for(int i=0;i<taps;++i) {
+                const float window=i<taps-tail?1.f:float(.5+.5*std::cos(Pi*(i-(taps-tail))/(tail-1)));
+                const float value=real[i]/SynthesisSize*window;
+                // Remove FFT roundoff dust only; a flat Mid path becomes one MAC.
+                impulse[mode][i]=std::abs(value)<1e-12f?0.f:value;
             }
-            for(int p=0;p<Parts;++p) {
-                auto &s=spectra[mode][p];std::copy_n(impulse[mode].data()+p*Block,Block,s.re.begin());
-                auto split=s.split();vDSP_fft_zip(small,&split,1,9,FFT_FORWARD);
-            }
+            int active=taps;
+            while(active>1&&impulse[mode][active-1]==0.f)--active;
+            activeTaps[mode]=active;
+            std::reverse_copy(impulse[mode].begin(),impulse[mode].begin()+active,reversed[mode].begin());
         }
     }
 };
-inline void accumulate(Spectrum &sum,const Spectrum &x,const Spectrum &h) {
-    // Only positive frequencies: real FIR/input are Hermitian. Four bins per SIMD lane group.
-    int k=0;
+inline float dot(const float *samples,const float *kernel,int count) {
+    float result=0;int k=0;
 #if defined(__aarch64__) && !defined(PATCHLANE_DIPOLE_SCALAR)
-    for(;k<256;k+=4) {
-        auto xr=vld1q_f32(x.re.data()+k),xi=vld1q_f32(x.im.data()+k),hr=vld1q_f32(h.re.data()+k),hi=vld1q_f32(h.im.data()+k);
-        auto re=vld1q_f32(sum.re.data()+k),im=vld1q_f32(sum.im.data()+k);
-        re=vfmsq_f32(vfmaq_f32(re,xr,hr),xi,hi);im=vfmaq_f32(vfmaq_f32(im,xr,hi),xi,hr);
-        vst1q_f32(sum.re.data()+k,re);vst1q_f32(sum.im.data()+k,im);
+    auto a=vdupq_n_f32(0),b=a,c=a,d=a;
+    for(;k+16<=count;k+=16) {
+        a=vfmaq_f32(a,vld1q_f32(samples+k),vld1q_f32(kernel+k));
+        b=vfmaq_f32(b,vld1q_f32(samples+k+4),vld1q_f32(kernel+k+4));
+        c=vfmaq_f32(c,vld1q_f32(samples+k+8),vld1q_f32(kernel+k+8));
+        d=vfmaq_f32(d,vld1q_f32(samples+k+12),vld1q_f32(kernel+k+12));
     }
+    a=vaddq_f32(vaddq_f32(a,b),vaddq_f32(c,d));
+    for(;k+4<=count;k+=4)a=vfmaq_f32(a,vld1q_f32(samples+k),vld1q_f32(kernel+k));
+    result=vaddvq_f32(a);
 #endif
-    for(;k<=256;++k){sum.re[k]+=x.re[k]*h.re[k]-x.im[k]*h.im[k];sum.im[k]+=x.re[k]*h.im[k]+x.im[k]*h.re[k];}
+    for(;k<count;++k)result+=samples[k]*kernel[k];
+    return result;
 }
 struct Biquad {
     double b0,b1,b2,a1,a2;
@@ -178,13 +187,11 @@ struct Biquad {
 };
 struct Processor {
     std::shared_ptr<const Coefficients> coefficients;
-    FFTSetup fft=nullptr;
     std::vector<Biquad> eq;
     float trim=1;
-    std::array<std::array<Spectrum,Coefficients::Parts>,2> history{};
-    std::array<std::array<float,256>,2> pending{},output{},overlap{};
-    Spectrum sum;
-    int index=0,head=0,blocksSeen=0,startup=0;
+    // Mirrored circular histories give contiguous oldest-to-newest samples.
+    alignas(64) std::array<std::array<float,Coefficients::MaxTaps*2>,2> history{};
+    int index=0;
     bool dormant=true;
     float blend=0;
     explicit Processor(std::shared_ptr<const Coefficients> c):coefficients(std::move(c)) {
@@ -192,27 +199,12 @@ struct Processor {
         eq.reserve(31);
         for(int i=0;i<31;++i)if(coefficients->settings.geqDB[i]!=0)eq.emplace_back(centres[i],coefficients->settings.geqDB[i],coefficients->rate);
         trim=float(std::pow(10,coefficients->settings.trimDB/20));
-        fft=vDSP_create_fftsetup(9,kFFTRadix2);if(!fft)throw std::bad_alloc();
-    }
-    ~Processor(){vDSP_destroy_fftsetup(fft);}
-    void block() {
-        for(int mode=0;mode<2;++mode) {
-            auto &x=history[mode][head];x.re.fill(0);x.im.fill(0);std::copy(pending[mode].begin(),pending[mode].end(),x.re.begin());
-            auto split=x.split();vDSP_fft_zip(fft,&split,1,9,FFT_FORWARD);
-            sum.re.fill(0);sum.im.fill(0);
-            for(int p=0;p<std::min(blocksSeen+1,Coefficients::Parts);++p)accumulate(sum,history[mode][(head-p+Coefficients::Parts)%Coefficients::Parts],coefficients->spectra[mode][p]);
-            sum.im[0]=sum.im[256]=0;
-            for(int k=1;k<256;++k){sum.re[512-k]=sum.re[k];sum.im[512-k]=-sum.im[k];}
-            split=sum.split();vDSP_fft_zip(fft,&split,1,9,FFT_INVERSE);
-            for(int i=0;i<256;++i){output[mode][i]=sum.re[i]/512+overlap[mode][i];overlap[mode][i]=sum.re[i+256]/512;}
-        }
-        head=(head+1)%Coefficients::Parts;blocksSeen=std::min(Coefficients::Parts,blocksSeen+1);
     }
     void process(float *left,int leftStride,float *right,int rightStride,int frames,bool enabled) {
         if(!enabled&&blend==0){dormant=true;return;}
         if(enabled&&dormant) {
-            index=head=blocksSeen=0;startup=Coefficients::Block;
-            for(auto &v:pending)v.fill(0);for(auto &v:output)v.fill(0);for(auto &v:overlap)v.fill(0);
+            index=0;
+            for(auto &v:history)v.fill(0);
             for(auto &band:eq)band.reset();
             dormant=false;
         }
@@ -230,15 +222,21 @@ struct Processor {
 #endif
             }
             el*=trim;er*=trim;
-            // Same L/R GEQ commutes with the fixed scalar correction FIR.
-            // Correction+matrix share the FFT; equivalent order: correction -> GEQ -> matrix.
-            pending[0][index]=(el+er)*.5f;pending[1][index]=(el-er)*.5f;
-            float wl=(output[0][index]+output[1][index])*coefficients->gain,wr=(output[0][index]-output[1][index])*coefficients->gain;
-            if(startup>0)--startup;
-            else blend=enabled?std::min(1.f,blend+step):std::max(0.f,blend-step);
+            // Linked-stereo GEQ commutes with the scalar correction; the modal
+            // FIR combines correction and dipole with no block buffering.
+            const float modal[2]={(el+er)*.5f,(el-er)*.5f};
+            float filtered[2];
+            for(int mode=0;mode<2;++mode) {
+                auto &past=history[mode];past[index]=past[index+Coefficients::MaxTaps]=modal[mode];
+                const int count=coefficients->activeTaps[mode];
+                filtered[mode]=dot(past.data()+index+Coefficients::MaxTaps+1-count,coefficients->reversed[mode].data(),count);
+            }
+            const float wl=(filtered[0]+filtered[1])*coefficients->gain,wr=(filtered[0]-filtered[1])*coefficients->gain;
+            blend=enabled?std::min(1.f,blend+step):std::max(0.f,blend-step);
             left[f*leftStride]=l+(wl-l)*blend;right[f*rightStride]=r+(wr-r)*blend;
-            if(++index==256){block();index=0;}
+            index=(index+1)&(Coefficients::MaxTaps-1);
         }
+        if(!enabled&&blend==0)dormant=true;
     }
 };
 // Control thread owns allocation and reclamation. Audio only reads atomics and computes.

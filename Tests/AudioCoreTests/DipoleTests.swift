@@ -187,8 +187,11 @@ final class DipoleTests:XCTestCase {
         var invalid=DipoleParameters().core;invalid.spacingCM=0
         XCTAssertNil(lc_dipole_test_create(&invalid,44100))
     }
-    func testDipoleImpulseArrivesWithinTwentyMilliseconds() throws {
-        XCTAssertEqual(lc_dipole_latency(),256)
+    func testDipoleImpulseHasNoAddedBufferDelay() throws {
+        XCTAssertEqual(lc_dipole_latency(),0)
+        for (rate,taps) in [(44100.0,256),(48000,256),(88200,512),(96000,512),(176400,1024),(192000,1024)] {
+            XCTAssertEqual(lc_dipole_taps(rate),Int32(taps))
+        }
         for rate in [44100.0,48000,88200,96000] {
             var config=DipoleParameters().core
             let dsp=try XCTUnwrap(lc_dipole_test_create(&config,rate))
@@ -199,7 +202,7 @@ final class DipoleTests:XCTestCase {
             impulse[0]=0.01;impulse[1]=0.01
             lc_dipole_test_process(dsp,&impulse,12000,1)
             let peak=(0..<12000).max{abs(impulse[2*$0])<abs(impulse[2*$1])}!
-            XCTAssertLessThan(Double(peak)/rate,0.020)
+            XCTAssertEqual(peak,0)
         }
     }
     func testDipoleDoesNotAutomaticallyAttenuateMonoSignal() throws {

@@ -14,6 +14,7 @@ LCDipoleTest *lc_dipole_test_create(const LCDipoleConfig *config,double rate);
 void lc_dipole_test_destroy(LCDipoleTest *effect);
 void lc_dipole_test_process(LCDipoleTest *effect,float *stereo,int frames,int enabled);
 int lc_dipole_latency(void);
+int lc_dipole_taps(double rate);
 const char *lc_dipole_backend(void);
 // Control-thread-only connection diagnostic; does not start audio IO.
 int lc_shared_probe(char *error,int capacity);

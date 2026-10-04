@@ -85,7 +85,7 @@
 "低域の左右差を保持。配置に合わせて入力してください。設定変更は再生中に適用されます。" = "Preserves low-frequency Side. Enter your actual geometry. Changes apply during playback.";
 "ダイポールとGEQの設定" = "Dipole and GEQ settings";
 
-"最小位相 · FFTバッファ %.1f ms" = "Minimum phase · FFT buffer %.1f ms";
+"最小位相 · %dタップ · 追加バッファ 0サンプル" = "Minimum phase · %d taps · 0 added buffer samples";
 
 "プリセットを上書きしますか？" = "Overwrite preset?";
 "上書き" = "Overwrite";

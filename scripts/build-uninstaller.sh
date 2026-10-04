@@ -13,8 +13,8 @@ plist={"CFBundleIdentifier":"audio.patchlane.uninstaller",
        "CFBundleExecutable":"PatchlaneUninstaller",
        "CFBundleName":"Patchlane Uninstaller",
        "CFBundleDisplayName":"Patchlane アンインストーラー",
-       "CFBundlePackageType":"APPL", "CFBundleVersion":"2",
-       "CFBundleShortVersionString":"0.4.0", "LSMinimumSystemVersion":"13.0",
+       "CFBundlePackageType":"APPL", "CFBundleVersion":"3",
+       "CFBundleShortVersionString":"0.4.1", "LSMinimumSystemVersion":"13.0",
        "NSHighResolutionCapable":True}
 (Path(sys.argv[1])/"Contents/Info.plist").write_bytes(plistlib.dumps(plist))
 PY

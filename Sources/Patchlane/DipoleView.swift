@@ -97,7 +97,7 @@ struct DipoleEditor:View {
                 DipoleBandSlider(value:parameters.trimDB,label:L("入力ゲイン"),vertical:false).frame(width:190,height:22)
                 Text(String(format:"%+.1f dB",parameters.wrappedValue.trimDB)).monospacedDigit()
                 Spacer()
-                Text(L("最小位相 · FFTバッファ %.1f ms",Double(lc_dipole_latency())*1000/Double(model.settings.audio.sampleRate))).foregroundStyle(.secondary)
+                Text(L("最小位相 · %dタップ · 追加バッファ 0サンプル",lc_dipole_taps(Double(model.settings.audio.sampleRate)))).foregroundStyle(.secondary)
             }
             Text(L("低域の左右差を保持。配置に合わせて入力してください。設定変更は再生中に適用されます。")).font(.caption).foregroundStyle(.secondary)
             if let message { Text(message).foregroundStyle(.red) }
