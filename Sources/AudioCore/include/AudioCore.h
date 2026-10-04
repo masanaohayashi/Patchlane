@@ -81,6 +81,8 @@ const char *lc_error(LCEngine *e);
 float lc_input_peak(LCEngine *e, int index);
 float lc_output_peak(LCEngine *e, int index);
 // Offline pull for diagnostics; not a network streaming interface.
+// Control-thread preparation for offline SRC; serialize with lc_mix_read.
+int lc_mix_prepare(LCEngine *e, int bus, double rate);
 void lc_mix_read(LCEngine *e, int bus, float *stereo, int frames, double rate);
 void lc_mix_reset(LCEngine *e, int bus);
 // Hardware-independent test entry point, before starting devices.

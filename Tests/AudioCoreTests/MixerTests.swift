@@ -91,10 +91,11 @@ final class MixerTests:XCTestCase {
     }
     func testDifferentSampleRatesAndWraparound() {
         lc_route(engine,0,0,1)
-        for _ in 0..<400 {
+        for iteration in 0..<400 {
             feed(0,0.25,-0.25,frames:441,rate:44100)
+            if iteration == 0 { XCTAssertEqual(lc_mix_prepare(engine,0,48000),0) }
             let audio=render(0)
-            XCTAssertTrue(audio.allSatisfy{$0.isFinite && abs($0)<=0.251})
+            XCTAssertTrue(audio.allSatisfy{$0.isFinite && abs($0)<=0.3})
         }
         feed(0,0.25,-0.25,frames:441,rate:44100)
         let audio=render(0);XCTAssertEqual(audio[0],0.25,accuracy:0.001)

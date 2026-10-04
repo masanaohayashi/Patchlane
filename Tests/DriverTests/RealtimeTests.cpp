@@ -47,6 +47,7 @@ int main() {
     LCDipoleConfig dipole{};dipole.spacingCM=20;dipole.distanceCM=100;dipole.headCM=17.5;dipole.maxBoostDB=12;dipole.tonalReference=1;
     dipole.geqDB[0]=12;dipole.geqDB[17] = -6;
     assert(lc_output_dipole(engine.get(),0,&dipole,44100)==0);lc_output_dipole_enabled(engine.get(),0,1);
+    engine->output[0].kernels[0]=std::make_shared<patchsrc::MinimumPhaseKernel>(48000.0/44100);
     // Control publication and UI meter reads must not force audio to wait.
     std::thread control([&] {
         for(int i=0;i<256;++i) {

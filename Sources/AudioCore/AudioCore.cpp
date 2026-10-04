@@ -1,5 +1,6 @@
 #include "AudioCore.h"
 #include "DipoleDSP.hpp"
+#include "MinimumPhaseSRC.hpp"
 #include <AudioToolbox/AudioToolbox.h>
 #include <CoreAudio/CoreAudio.h>
 #include <atomic>
@@ -47,6 +48,7 @@ struct Output {
     patchdipole::Effect dipole;
     std::atomic<float> gain{1},peak{0};
     Cursor cursor[N]; float master=0;
+    std::shared_ptr<const patchsrc::MinimumPhaseKernel> kernels[N];
     std::atomic<uint32_t> callbackFrames{0};
 };
 uint32_t channels(uint32_t id, bool input) {
@@ -103,6 +105,18 @@ struct LCEngine {
         }
         std::snprintf(error,sizeof(error),"Device %u did not accept requested timing (%g).",device,double(value));return false;
     }
+    bool acceptsRate(uint32_t device,double rate,bool &supported) {
+        AudioObjectPropertyAddress a{kAudioDevicePropertyAvailableNominalSampleRates,kAudioObjectPropertyScopeGlobal,kAudioObjectPropertyElementMain};
+        UInt32 size=0;
+        if(!check(AudioObjectGetPropertyDataSize(device,&a,0,nullptr,&size),"Read supported sample rates"))return false;
+        if(!size || size%sizeof(AudioValueRange))return check(kAudioHardwareBadPropertySizeError,"Read supported sample rates");
+        std::vector<AudioValueRange> ranges(size/sizeof(AudioValueRange));
+        if(!check(AudioObjectGetPropertyData(device,&a,0,nullptr,&size,ranges.data()),"Read supported sample rates"))return false;
+        supported=false;
+        for(size_t i=0;i<size/sizeof(AudioValueRange);++i)
+            if(rate>=ranges[i].mMinimum && rate<=ranges[i].mMaximum)supported=true;
+        return true;
+    }
     bool prepareDevice(uint32_t device) {
         if(!device)return true;
         for(auto &state:originals)if(state.device==device)return true;
@@ -110,7 +124,13 @@ struct LCEngine {
         if(!readDevice(device,kAudioDevicePropertyNominalSampleRate,state.rate) ||
            !readDevice(device,kAudioDevicePropertyBufferFrameSize,state.frames))return false;
         originals.push_back(state);
-        if(state.rate!=systemRate && !setDevice(device,kAudioDevicePropertyNominalSampleRate,systemRate))return false;
+        if(state.rate!=systemRate) {
+            bool supported=false;
+            if(!acceptsRate(device,systemRate,supported))return false;
+            // Fixed-rate interfaces keep their native clock. setup() reads the
+            // actual rate, and mix() already resamples between device clocks.
+            if(supported && !setDevice(device,kAudioDevicePropertyNominalSampleRate,systemRate))return false;
+        }
         if(state.frames!=uint32_t(blockFrames) && !setDevice(device,kAudioDevicePropertyBufferFrameSize,uint32_t(blockFrames)))return false;
         return true;
     }
@@ -136,27 +156,32 @@ struct LCEngine {
         for(int i=0;i<N;++i) {
             auto &in=input[i]; auto &c=o.cursor[i];
             const auto w=in.ring.written.load(std::memory_order_acquire);
-            // Read the newest complete callback block; never accumulate a fixed
-            // time cushion. Unequal rates need one interpolation lookahead sample.
-            const double target=std::ceil(frames*in.rate/rate)+(in.rate==rate ? 0:1)+delayFrames*in.rate/systemRate;
-            if(!c.ready || c.position< double(w)-Capacity+2 || c.position>double(w)) {
+            // The causal SRC uses history, not lookahead or a fixed time cushion.
+            const auto *kernel=o.kernels[i].get();
+            // Unprepared offline diagnostics support exact-rate copy only.
+            if(!kernel && in.rate!=rate)continue;
+            const double target=std::ceil(frames*in.rate/rate)+delayFrames*in.rate/systemRate;
+            if(!c.ready || c.position< double(w)-Capacity+(kernel?kernel->taps:2) || c.position>double(w)) {
                 if(!c.ready && double(w)-c.position<target) { continue; }
                 if(double(w)<target) { c.ready=false; continue; }
                 c.position=double(w)-target; c.ready=true;
             }
             // Smoothly track clock drift rather than changing hardware clocks.
             const double errorFrames=double(w)-c.position-target;
-            const double adjustment=std::clamp(errorFrames/(in.rate*2.0),-0.003,0.003);
+            const double adjustment=kernel?std::clamp(errorFrames/(in.rate*2.0),-0.003,0.003):0;
             const double step=in.rate/rate*(1+adjustment);
             const float goal=in.route[bus].load(std::memory_order_relaxed)?in.gain.load(std::memory_order_relaxed):0;
             const float slew=1.f-std::exp(-1.f/(float(rate)*0.005f));
             for(int f=0;f<frames;++f) {
                 c.gain+=(goal-c.gain)*slew;
-                auto p=uint64_t(c.position); float t=float(c.position-p);
-                if(p>=w || (t>0 && p+1>=w)) { c.position=double(w); c.ready=false; break; }
-                for(int ch=0;ch<2;++ch) {
-                    float a=in.ring.at(p,ch),b=t>0 ? in.ring.at(p+1,ch):a;
-                    dest[f*2+ch]+=(a+(b-a)*t)*c.gain;
+                auto p=uint64_t(c.position);
+                if(p>=w) { c.position=double(w); c.ready=false; break; }
+                if(kernel) {
+                    float l,r;
+                    kernel->sample(c.position,[&](uint64_t f,int ch){return in.ring.at(f,ch);},l,r);
+                    dest[f*2]+=l*c.gain;dest[f*2+1]+=r*c.gain;
+                } else {
+                    for(int ch=0;ch<2;++ch)dest[f*2+ch]+=in.ring.at(p,ch)*c.gain;
                 }
                 c.position+=step;
             }
@@ -283,6 +308,18 @@ int lc_start(LCEngine *e){
             if(!setup(e,o.unit,o.device,false,o.rate,2,&e->contexts[i])){lc_stop(e);return -1;}
         }
     }
+    // Immutable kernels are shared by equal-rate routes and prepared before
+    // any callback starts, including nominally equal but independent clocks.
+    try {
+        for(int b=0;b<N;++b)for(int i=0;i<N;++i) {
+            auto &k=e->output[b].kernels[i];k.reset();
+            if(!e->input[i].device||!e->output[b].device)continue;
+            const double ratio=e->input[i].rate/e->output[b].rate;
+            for(int bb=0;bb<=b&&!k;++bb)for(int ii=0;ii<N&&!k;++ii)
+                if((bb<b||ii<i)&&e->output[bb].kernels[ii]&&e->input[ii].rate/e->output[bb].rate==ratio)k=e->output[bb].kernels[ii];
+            if(!k)k=std::make_shared<patchsrc::MinimumPhaseKernel>(ratio);
+        }
+    } catch(...) { e->check(-1,"Prepare minimum-phase SRC");lc_stop(e);return -1; }
     for(int i=0;i<N;++i){
         if(e->input[i].unit&&!e->check(AudioOutputUnitStart(e->input[i].unit),"Start input")){lc_stop(e);return -1;}
         if(e->output[i].unit&&!e->check(AudioOutputUnitStart(e->output[i].unit),"Start output")){lc_stop(e);return -1;}
@@ -293,6 +330,11 @@ void lc_stop(LCEngine *e){if(!e)return;for(auto &o:e->output)dispose(o.unit);for
 const char *lc_error(LCEngine *e){return e->error;}
 float lc_input_peak(LCEngine *e,int i){return e&&i>=0&&i<N?e->input[i].peak.exchange(0):0;}
 float lc_output_peak(LCEngine *e,int i){return e&&i>=0&&i<N?e->output[i].peak.exchange(0):0;}
+int lc_mix_prepare(LCEngine *e,int b,double r){
+    if(!e||e->running||b<0||b>=N||!std::isfinite(r)||r<8000)return -1;
+    try {for(int i=0;i<N;++i)e->offline[b].kernels[i]=std::make_shared<patchsrc::MinimumPhaseKernel>(e->input[i].rate/r);return 0;}
+    catch(...){return -1;}
+}
 void lc_mix_read(LCEngine *e,int b,float *p,int n,double r){if(e&&b>=0&&b<N&&n>0&&n<=MaxFrames&&r>=8000)e->mix(e->offline[b],b,p,n,r);}
 void lc_mix_reset(LCEngine *e,int b){if(e&&b>=0&&b<N){for(auto &c:e->offline[b].cursor)c={};e->offline[b].master=0;}}
 void lc_test_feed(LCEngine *e,int i,const float *p,int n,double r){if(e&&!e->running&&i>=0&&i<N&&r>=8000){e->input[i].rate=r;e->input[i].ring.push(p,n);}}

@@ -30,3 +30,11 @@ xcrun clang++ -std=c++17 -O2 -Wall -Wextra -Werror -IShared Tests/DriverTests/Sh
 
 xcrun clang++ -std=c++17 -O2 -Wall -Wextra -Werror -IShared Tests/DriverTests/MachRingTests.cpp -o .build/mach-ring-tests
 .build/mach-ring-tests
+
+xcrun clang++ -std=c++17 -O2 -Wall -Wextra -Werror -ISources/AudioCore/include Tests/DriverTests/DeviceTimingTests.cpp \
+  -framework AudioToolbox -framework CoreAudio -framework CoreFoundation -framework Accelerate -o .build/device-timing-tests
+.build/device-timing-tests
+
+# Causal minimum-phase SRC quality and phase continuity.
+xcrun clang++ -std=c++17 -O2 -Wall -Wextra -Werror Tests/DriverTests/MinimumPhaseSRCTests.cpp -framework Accelerate -o .build/minimum-phase-src-tests
+.build/minimum-phase-src-tests
